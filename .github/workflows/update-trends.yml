@@ -35,7 +35,7 @@ jobs:
         run: |
           git config user.name "surge-radar-bot"
           git config user.email "actions@users.noreply.github.com"
-          git add trends.json
+          git add .
           if git diff --staged --quiet; then
             echo "변경 없음 - 커밋 생략"
           else
