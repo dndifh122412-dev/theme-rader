@@ -1,6 +1,6 @@
 name: update-trends
 
-# 6시간마다 자동 실행 + 수동 실행 버튼 + 코드 푸시 시
+# 6시간마다 자동 실행 + 수동 실행 버튼(workflow_dispatch) + 코드 푸시 시
 on:
   schedule:
     - cron: "17 */6 * * *"
@@ -21,21 +21,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          
+
       - name: Install deps
         run: pip install -r requirements.txt
-        
+
       - name: Collect trends
         run: python collector.py --out trends.json --keep-stale
-        
+
       - name: Commit if changed
         run: |
           git config user.name "surge-radar-bot"
           git config user.email "actions@users.noreply.github.com"
-          git add .
+          git add trends.json
           if git diff --staged --quiet; then
             echo "변경 없음 - 커밋 생략"
           else
