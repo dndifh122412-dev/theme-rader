@@ -228,10 +228,10 @@
 <div id="app"><div class="skeleton">데이터 불러오는 중…</div></div>
 
 <footer>
-  지금 순위 = 현재 관심도(가열도) · HOT = 급등 순위<br>
+  지금 순위 = 검색 규모(앵커 기준 추정) · HOT = 급등 순위<br>
   급등 점수 = 최근 하루 vs 지난 6일 + 추세 + 가속<br>
   분위기 = 연관 검색어의 긍정/부정 단어 비율 (거친 추정)<br>
-  ※ 관심도는 각 테마의 자기 최근 대비 수준(0~100)이라 테마 간 절대 검색량 비교는 아님 · 투자 자문 아님
+  ※ 규모는 'stock market' 검색량을 기준으로 환산한 추정치 · 투자 자문 아님
   <div><span class="reload" id="reload">↻ 새로고침</span></div>
 </footer>
 
@@ -359,13 +359,13 @@ function render(d){
   const topColor = scoreColor(top.score);
   const dStart = fmtDate(top.spark_start), dEnd = fmtDate(top.spark_end);
   html += `<div class="hero">
-    <div class="tag"><span class="pip"></span>지금 관심도 1위${top.hot?` <b class="hotinline">HOT ${top.hot}</b>`:''}${top.emerging?' <b class="newinline">NEW</b>':''}</div>
+    <div class="tag"><span class="pip"></span>지금 규모 1위${top.hot?` <b class="hotinline">HOT ${top.hot}</b>`:''}${top.emerging?' <b class="newinline">NEW</b>':''}</div>
     <div class="name">${esc(top.theme)}</div>
     <div class="kw">"${esc(top.keyword)}"${moodBadge(top.sentiment)}</div>
     <div class="chart">${chart(top.spark, 520, 74, topColor, true)}</div>
     <div class="axis"><span>${dStart}</span><span class="mid">최근 ${d.chart_span_days||7}일 · 시간별</span><span>${dEnd}</span></div>
     <div class="row">
-      <div class="score">${top.recent}<small>/100 관심도</small></div>
+      <div class="score">${top.size}<small>/100 규모</small></div>
       <div class="stat"><span class="lbl">급등 점수</span>
         <span class="val" style="color:${top.hot?'var(--surge-hot)':'var(--text)'}">${Math.round(top.score)}</span></div>
       <div class="stat"><span class="lbl">상승률</span>
@@ -375,7 +375,7 @@ function render(d){
   </div>`;
 
   if(themes.length > 1){
-    html += `<div class="list-head">지금 관심도 순위 <span>${themes.length-1} more</span></div>`;
+    html += `<div class="list-head">지금 검색 규모 순위 <span>${themes.length-1} more</span></div>`;
     let i = 0;
     for(const t of themes.slice(1)){
       const c = scoreColor(t.score), up = t.change_pct >= 0;
