@@ -147,6 +147,10 @@
   .badge.dn{color:var(--cool);background:rgba(91,149,188,.12)}
   .badge.new{color:#08090F;background:var(--surge);font-weight:700;letter-spacing:.04em;
     box-shadow:0 0 12px rgba(255,180,84,.4)}
+  .badge.hot{color:#08090F;background:var(--surge-hot);font-weight:700;letter-spacing:.04em;
+    box-shadow:0 0 12px rgba(255,122,51,.5)}
+  .hero .tag .hotinline{color:var(--surge-hot);font-weight:700}
+  .hero .tag .newinline{color:var(--surge);font-weight:700}
   .card .right{display:flex;align-items:center;gap:12px}
   .card .mini{flex:none}
   .card .sc{font-family:var(--mono);font-size:21px;font-weight:700;line-height:1;
@@ -224,9 +228,10 @@
 <div id="app"><div class="skeleton">데이터 불러오는 중…</div></div>
 
 <footer>
-  Google Trends 검색 관심도 기반 · 투자 자문 아님<br>
+  지금 순위 = 현재 관심도(가열도) · HOT = 급등 순위<br>
   급등 점수 = 최근 하루 vs 지난 6일 + 추세 + 가속<br>
-  분위기 = 연관 검색어의 긍정/부정 단어 비율 (거친 추정)
+  분위기 = 연관 검색어의 긍정/부정 단어 비율 (거친 추정)<br>
+  ※ 관심도는 각 테마의 자기 최근 대비 수준(0~100)이라 테마 간 절대 검색량 비교는 아님 · 투자 자문 아님
   <div><span class="reload" id="reload">↻ 새로고침</span></div>
 </footer>
 
@@ -354,33 +359,34 @@ function render(d){
   const topColor = scoreColor(top.score);
   const dStart = fmtDate(top.spark_start), dEnd = fmtDate(top.spark_end);
   html += `<div class="hero">
-    <div class="tag"><span class="pip"></span>${top.emerging?'신규 급부상 테마':'지금 가장 뜨는 테마'}</div>
+    <div class="tag"><span class="pip"></span>지금 관심도 1위${top.hot?` <b class="hotinline">HOT ${top.hot}</b>`:''}${top.emerging?' <b class="newinline">NEW</b>':''}</div>
     <div class="name">${esc(top.theme)}</div>
     <div class="kw">"${esc(top.keyword)}"${moodBadge(top.sentiment)}</div>
     <div class="chart">${chart(top.spark, 520, 74, topColor, true)}</div>
     <div class="axis"><span>${dStart}</span><span class="mid">최근 ${d.chart_span_days||7}일 · 시간별</span><span>${dEnd}</span></div>
     <div class="row">
-      <div class="score">${top.score}<small>/100</small></div>
+      <div class="score">${top.recent}<small>/100 관심도</small></div>
+      <div class="stat"><span class="lbl">급등 점수</span>
+        <span class="val" style="color:${top.hot?'var(--surge-hot)':'var(--text)'}">${Math.round(top.score)}</span></div>
       <div class="stat"><span class="lbl">상승률</span>
         <span class="val" style="color:${top.change_pct>=0?'var(--surge)':'var(--cool)'}">${fmtPct(top.change_pct)}</span></div>
-      <div class="stat"><span class="lbl">관심도</span>
-        <span class="val">${top.baseline}→${top.recent}</span></div>
     </div>
     ${risingHtml(top.rising)}
   </div>`;
 
   if(themes.length > 1){
-    html += `<div class="list-head">급등 순위 <span>${themes.length-1} more</span></div>`;
+    html += `<div class="list-head">지금 관심도 순위 <span>${themes.length-1} more</span></div>`;
     let i = 0;
     for(const t of themes.slice(1)){
       const c = scoreColor(t.score), up = t.change_pct >= 0;
       const delay = Math.min(i*45, 600);
       html += `<div class="card" style="animation-delay:${delay}ms">
         <div class="bar" style="background:${c};box-shadow:0 0 ${Math.round(t.score/7)}px ${c}"></div>
-        <div class="rank">${t.rank}</div>
+        <div class="rank">${t.rank_now}</div>
         <div class="info">
           <div class="name">${esc(t.theme)}</div>
           <div class="sub">
+            ${t.hot?`<span class="badge hot">HOT ${t.hot}</span>`:''}
             ${t.emerging?'<span class="badge new">NEW</span>':''}
             <span class="badge ${up?'up':'dn'}">${fmtPct(t.change_pct)}</span>
             <span class="kw">"${esc(t.keyword)}"</span>
