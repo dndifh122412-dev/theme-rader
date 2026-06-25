@@ -70,6 +70,11 @@ WITH_RELATED = True      # 연관어(rising)+감성 수집. 호출이 늘어 429
 EMERGING_BASELINE = 25   # 평소 이 값보다 관심이 낮던 테마가 급등하면 '신규 부상(NEW)'으로 표시
 HOT_TOP_N = 5            # 급등 점수 상위 몇 개까지 'HOT'으로 표시할지
 HOT_MIN_SCORE = 25       # 이 점수 미만이면 HOT 제외(급등 약한 날 과도한 HOT 방지)
+# 절대 규모 비교: 여러 키워드를 '앵커'와 함께 묶어 호출하면 상호 정규화돼서
+# 테마 간 진짜 크기 비교가 가능해진다(=AI/반도체가 드론보다 위). 동시에 호출 수가 줄어 429도 완화.
+ANCHOR_KEYWORD = "stock market"  # 모든 배치에 끼우는 기준 검색어(검색량이 안정적인 것)
+BATCH_SIZE = 4                   # 한 번에 비교할 테마 수(앵커 포함 5개 = 구글 한 번 호출 최대)
+RELATED_TOP = 6                  # 연관어/감성은 규모 상위 N개만 수집(호출 절감)
 
 # 검색어 감성 사전 (주식/금융 맥락). 연관 검색어 단어를 매칭해 긍/부정 비율을 추정한다.
 # 완벽한 감성 분석이 아니라 "사람들이 이 테마를 긍/부정 어느 쪽으로 검색하나"의 거친 신호.
@@ -269,7 +274,8 @@ def collect_mock() -> list[dict]:
         metrics = compute_surge(series)
         cvals, cstart, cend = chart_series(series, dates)
         row = {**th, **metrics, "spark": cvals,
-               "spark_start": cstart, "spark_end": cend, "ok": True}
+               "spark_start": cstart, "spark_end": cend,
+               "abs_level": round(metrics["recent"] / 30 * (1.5 - i * 0.04), 3), "ok": True}
         if kind in ("surge", "rising"):
             row["rising"] = [{"q": th["keyword"] + " stocks", "v": "급등"},
                              {"q": th["keyword"] + " etf", "v": "+180%"}]
@@ -299,34 +305,59 @@ def collect_live() -> tuple[list[dict], list[dict]]:
     )
 
     rows, errors = [], []
-    for i, th in enumerate(THEMES):
-        kw = th["keyword"]
+
+    # 1) 테마를 BATCH_SIZE개씩 묶고, 각 배치에 앵커를 끼워 함께 호출한다.
+    #    같은 호출 안의 키워드는 상호 정규화되므로 '앵커 대비 비율'로 절대 규모를 비교할 수 있다.
+    #    호출 수도 20 → 5로 줄어 429가 크게 완화된다.
+    batches = [THEMES[i:i + BATCH_SIZE] for i in range(0, len(THEMES), BATCH_SIZE)]
+    for bi, batch in enumerate(batches, 1):
+        kws = [ANCHOR_KEYWORD] + [t["keyword"] for t in batch]
         try:
-            pytrends.build_payload([kw], cat=0, timeframe=TIMEFRAME, geo=GEO)
+            pytrends.build_payload(kws, cat=0, timeframe=TIMEFRAME, geo=GEO)
             df = pytrends.interest_over_time()
-            if df is None or df.empty or kw not in df.columns:
-                raise RuntimeError("empty result")
-            series = df[kw].astype(float).tolist()
+            if df is None or df.empty or ANCHOR_KEYWORD not in df.columns:
+                raise RuntimeError("empty / anchor missing")
+            anchor_mean = max(float(df[ANCHOR_KEYWORD].mean()), 1.0)  # 0 division 방지
             dates = [d.strftime("%Y-%m-%d") for d in df.index]
-            metrics = compute_surge(series)
-            cvals, cstart, cend = chart_series(series, dates)   # 7일 차트 + 시작/끝 날짜
-            row = {**th, **metrics, "spark": cvals,
-                   "spark_start": cstart, "spark_end": cend, "ok": True}
-            if WITH_RELATED:
-                time.sleep(1.0)                            # 연관어 호출 전 짧은 텀
-                row["rising"], row["sentiment"] = fetch_related(pytrends, kw)
-            rows.append(row)
-            tag = "  NEW" if metrics["emerging"] else ""
-            print(f"[ok]   {th['theme']:<20} score={metrics['score']:>5}  "
-                  f"({metrics['change_pct']:+.0f}%){tag}", file=sys.stderr)
+            for t in batch:
+                kw = t["keyword"]
+                if kw not in df.columns:
+                    errors.append({**t, "error": "not in result"})
+                    continue
+                series = df[kw].astype(float).tolist()
+                abs_level = round(float(df[kw].mean()) / anchor_mean, 3)  # 앵커 대비 규모
+                metrics = compute_surge(series)
+                cvals, cstart, cend = chart_series(series, dates)
+                rows.append({**t, **metrics, "abs_level": abs_level,
+                             "spark": cvals, "spark_start": cstart, "spark_end": cend,
+                             "rising": [], "sentiment": {"pos": 0, "neg": 0, "bias": None},
+                             "ok": True})
+                tag = "  NEW" if metrics["emerging"] else ""
+                print(f"[ok]   {t['theme']:<20} score={metrics['score']:>5} "
+                      f"level={abs_level:>6}{tag}", file=sys.stderr)
         except TooManyRequestsError:
-            print(f"[429]  {th['theme']:<20} rate-limited, 긴 대기 후 계속", file=sys.stderr)
-            errors.append({**th, "error": "rate_limited"})
+            for t in batch:
+                errors.append({**t, "error": "rate_limited"})
+            print(f"[429]  batch {bi} rate-limited, 긴 대기 후 계속", file=sys.stderr)
             time.sleep(60)
         except Exception as e:  # noqa: BLE001
-            print(f"[fail] {th['theme']:<20} {e}", file=sys.stderr)
-            errors.append({**th, "error": str(e)})
+            for t in batch:
+                errors.append({**t, "error": str(e)})
+            print(f"[fail] batch {bi}: {e}", file=sys.stderr)
         time.sleep(SLEEP_BETWEEN)
+
+    # 2) 연관어/감성은 규모 상위 RELATED_TOP개만 수집한다(호출을 아껴 429를 더 줄임).
+    if WITH_RELATED and rows:
+        top_rows = sorted(rows, key=lambda r: r["abs_level"], reverse=True)[:RELATED_TOP]
+        for r in top_rows:
+            kw = r["keyword"]
+            try:
+                pytrends.build_payload([kw], cat=0, timeframe=TIMEFRAME, geo=GEO)
+                time.sleep(1.0)
+                r["rising"], r["sentiment"] = fetch_related(pytrends, kw)
+            except Exception as e:  # noqa: BLE001
+                print(f"[warn] related {r['theme']}: {e}", file=sys.stderr)
+            time.sleep(SLEEP_BETWEEN)
 
     return rows, errors
 
@@ -383,8 +414,12 @@ def main() -> int:
         # 급등 상위 N개이면서 점수가 임계 이상이면 'HOT n'
         r["hot"] = i if (i <= HOT_TOP_N and r["score"] >= HOT_MIN_SCORE) else 0
 
-    # (2) 지금 순위 — 현재 가열도 축 (recent 내림차순). 화면 표시는 이 순서.
-    rows.sort(key=lambda r: r["recent"], reverse=True)
+    # (2) 지금 규모 순위 — 절대 크기 축 (앵커 대비 abs_level 내림차순).
+    #     size는 가장 큰 테마를 100으로 한 상대 규모(0~100). 화면 표시는 이 순서.
+    max_level = max((r.get("abs_level", 0) for r in rows), default=1) or 1
+    for r in rows:
+        r["size"] = round(r.get("abs_level", 0) / max_level * 100)
+    rows.sort(key=lambda r: r.get("abs_level", 0), reverse=True)
     for i, r in enumerate(rows, 1):
         r["rank_now"] = i
 
